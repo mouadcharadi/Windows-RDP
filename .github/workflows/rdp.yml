@@ -1,21 +1,65 @@
-name: RDP
+name: RDP Setup
 
 on: [workflow_dispatch]
 
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 60  # ⏱️ زيادة وقت التنفيذ
+    
     steps:
-      - name: Download ngrok
+      - name: Setup Ngrok and RDP
         run: |
+          # تحميل وتثبيت ngrok
           Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
-          Expand-Archive ngrok.zip
-          ./ngrok.exe authtoken 33mqbhskBfAlg0VydTSoVPhosSw_4XV3jMjtn8qSDU47BaEpb
+          Expand-Archive ngrok.zip -DestinationPath .\ngrok\
+          cd ngrok
+          .\ngrok.exe authtoken ${{ secrets.NGROK_AUTH_TOKEN }}
 
-      - name: Enable RDP
-        run: |
-          net user kamel123 MyStrong123 /add
+          # تمكين RDP
+          net user kamel123 "MyPass123!" /add /Y
           net localgroup administrators kamel123 /add
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          ./ngrok.exe tcp 3389
+
+      - name: Start Ngrok and Get URL
+        run: |
+          cd ngrok
+          
+          # تشغيل ngrok في الخلفية
+          Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389" -PassThru
+          
+          # انتظار التهيئة
+          Write-Host "🕒 Waiting for ngrok initialization..."
+          timeout /t 15
+          
+          # الحصول على الرابط عبر API
+          try {
+              $tunnels = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -TimeoutSec 10
+              $publicUrl = $tunnels.tunnels[0].public_url
+              Write-Host "✅ SUCCESS! RDP Connection URL:"
+              Write-Host "🔗 $publicUrl"
+              Write-Host "📝 Use this in your Remote Desktop Client"
+              
+              # حفظ الرابط كـ output
+              echo "RDP_URL=$publicUrl" >> $env:GITHUB_ENV
+          } catch {
+              Write-Host "❌ Failed to get tunnel URL: $($_.Exception.Message)"
+          }
+          
+          # إبقاء الـ workflow نشطاً
+          Write-Host "🔄 Keeping workflow active for 55 minutes..."
+          Write-Host "📌 The RDP tunnel will be available until this workflow ends"
+          timeout /t 3300  # ⏱️ 55 دقيقة
+
+      - name: Show Connection Info
+        if: always()
+        run: |
+          Write-Host "=========================================="
+          Write-Host "🎯 RDP CONNECTION INFORMATION"
+          Write-Host "=========================================="
+          Write-Host "IP: 0.tcp.ngrok.io (or similar)"
+          Write-Host "Port: Check the ngrok URL above"
+          Write-Host "Username: kamel123"
+          Write-Host "Password: MyPass123!"
+          Write-Host "=========================================="
